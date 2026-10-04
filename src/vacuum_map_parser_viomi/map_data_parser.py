@@ -63,53 +63,66 @@ class ViomiMapDataParser(MapDataParser):
             ViomiMapDataParser._parse_section(buf, "image", map_id)
             map_data.image, map_data.rooms, map_data.cleaned_rooms = self._parse_image(buf)
 
-        if feature_flags & ViomiMapDataParser.FEATURE_HISTORY != 0:
-            ViomiMapDataParser._parse_section(buf, "history", map_id)
-            map_data.path = ViomiMapDataParser._parse_history(buf)
+        # Header, robot status and image are required: without them there is no map.
+        # The sections after the image (path, charger, zones, rooms, ...) are only
+        # decorations. On some models (e.g. viomi.vacuum.v8) one of them fails its magic
+        # check, which used to discard the whole map. Keep what was parsed so far instead.
+        strict = bool(kwargs.get("strict", False))
+        try:
+            if feature_flags & ViomiMapDataParser.FEATURE_HISTORY != 0:
+                ViomiMapDataParser._parse_section(buf, "history", map_id)
+                map_data.path = ViomiMapDataParser._parse_history(buf)
 
-        if feature_flags & ViomiMapDataParser.FEATURE_CHARGE_STATION != 0:
-            ViomiMapDataParser._parse_section(buf, "charge_station", map_id)
-            map_data.charger = ViomiMapDataParser._parse_position(buf, "pos", with_angle=True)
-            _LOGGER.debug("pos: %s", map_data.charger)
+            if feature_flags & ViomiMapDataParser.FEATURE_CHARGE_STATION != 0:
+                ViomiMapDataParser._parse_section(buf, "charge_station", map_id)
+                map_data.charger = ViomiMapDataParser._parse_position(buf, "pos", with_angle=True)
+                _LOGGER.debug("pos: %s", map_data.charger)
 
-        if feature_flags & ViomiMapDataParser.FEATURE_RESTRICTED_AREAS != 0:
-            ViomiMapDataParser._parse_section(buf, "restricted_areas", map_id)
-            map_data.walls, map_data.no_go_areas = ViomiMapDataParser._parse_restricted_areas(buf)
+            if feature_flags & ViomiMapDataParser.FEATURE_RESTRICTED_AREAS != 0:
+                ViomiMapDataParser._parse_section(buf, "restricted_areas", map_id)
+                map_data.walls, map_data.no_go_areas = ViomiMapDataParser._parse_restricted_areas(buf)
 
-        if feature_flags & ViomiMapDataParser.FEATURE_CLEANING_AREAS != 0:
-            ViomiMapDataParser._parse_section(buf, "cleaning_areas", map_id)
-            map_data.zones = ViomiMapDataParser._parse_cleaning_areas(buf)
+            if feature_flags & ViomiMapDataParser.FEATURE_CLEANING_AREAS != 0:
+                ViomiMapDataParser._parse_section(buf, "cleaning_areas", map_id)
+                map_data.zones = ViomiMapDataParser._parse_cleaning_areas(buf)
 
-        if feature_flags & ViomiMapDataParser.FEATURE_NAVIGATE != 0:
-            ViomiMapDataParser._parse_section(buf, "navigate", map_id)
-            buf.skip("unknown1", 4)
-            map_data.goto = ViomiMapDataParser._parse_position(buf, "pos")
-            value = buf.get_float32("value")
-            _LOGGER.debug("pos: %s, value: %f", map_data.goto, value)
+            if feature_flags & ViomiMapDataParser.FEATURE_NAVIGATE != 0:
+                ViomiMapDataParser._parse_section(buf, "navigate", map_id)
+                buf.skip("unknown1", 4)
+                map_data.goto = ViomiMapDataParser._parse_position(buf, "pos")
+                value = buf.get_float32("value")
+                _LOGGER.debug("pos: %s, value: %f", map_data.goto, value)
 
-        if feature_flags & ViomiMapDataParser.FEATURE_REALTIME != 0:
-            ViomiMapDataParser._parse_section(buf, "realtime", map_id)
-            buf.skip("unknown1", 5)
-            map_data.vacuum_position = ViomiMapDataParser._parse_position(buf, "pos", with_angle=True)
-            _LOGGER.debug("pos: %s", map_data.vacuum_position)
+            if feature_flags & ViomiMapDataParser.FEATURE_REALTIME != 0:
+                ViomiMapDataParser._parse_section(buf, "realtime", map_id)
+                buf.skip("unknown1", 5)
+                map_data.vacuum_position = ViomiMapDataParser._parse_position(buf, "pos", with_angle=True)
+                _LOGGER.debug("pos: %s", map_data.vacuum_position)
 
-        if feature_flags & 0x00000800 != 0:
-            ViomiMapDataParser._parse_section(buf, "unknown1", map_id)
-            ViomiMapDataParser._parse_unknown_section(buf)
+            if feature_flags & 0x00000800 != 0:
+                ViomiMapDataParser._parse_section(buf, "unknown1", map_id)
+                ViomiMapDataParser._parse_unknown_section(buf)
 
-        if feature_flags & ViomiMapDataParser.FEATURE_ROOMS != 0 and map_data.rooms is not None:
-            ViomiMapDataParser._parse_section(buf, "rooms", map_id)
-            ViomiMapDataParser._parse_rooms(buf, map_data.rooms)
+            if feature_flags & ViomiMapDataParser.FEATURE_ROOMS != 0 and map_data.rooms is not None:
+                ViomiMapDataParser._parse_section(buf, "rooms", map_id)
+                ViomiMapDataParser._parse_rooms(buf, map_data.rooms)
 
-        if feature_flags & 0x00002000 != 0:
-            ViomiMapDataParser._parse_section(buf, "unknown2", map_id)
-            ViomiMapDataParser._parse_unknown_section(buf)
+            if feature_flags & 0x00002000 != 0:
+                ViomiMapDataParser._parse_section(buf, "unknown2", map_id)
+                ViomiMapDataParser._parse_unknown_section(buf)
 
-        if feature_flags & 0x00004000 != 0:
-            ViomiMapDataParser._parse_section(buf, "room_outlines", map_id)
-            ViomiMapDataParser._parse_room_outlines(buf)
+            if feature_flags & 0x00004000 != 0:
+                ViomiMapDataParser._parse_section(buf, "room_outlines", map_id)
+                ViomiMapDataParser._parse_room_outlines(buf)
 
-        buf.check_empty()
+            buf.check_empty()
+        except ValueError as err:
+            if strict:
+                raise
+            _LOGGER.warning(
+                "Ignoring unparseable trailing map data (%s); showing the map without the sections that follow",
+                err,
+            )
 
         if map_data.rooms is not None:
             _LOGGER.debug("rooms: %s", [str(room) for number, room in map_data.rooms.items()])
